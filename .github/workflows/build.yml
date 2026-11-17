@@ -1,0 +1,59 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Ekstrak semua file zip
+        run: |
+          shopt -s nullglob
+          for zip_file in *.zip; do
+            unzip -oq "$zip_file"
+          done
+
+      - name: Cari lokasi pom.xml
+        id: find_pom
+        run: |
+          POM_PATH=$(find . -name pom.xml -not -path "*/target/*" | head -n 1)
+          if [ -z "$POM_PATH" ]; then
+            echo "::error::pom.xml tidak ditemukan! Pastikan di dalam zip ada pom.xml dan folder src"
+            exit 1
+          fi
+          echo "project_dir=$(dirname "$POM_PATH")" >> $GITHUB_OUTPUT
+
+      - name: Pasang JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build pakai Maven
+        working-directory: ${{ steps.find_pom.outputs.project_dir }}
+        run: mvn -B -ntp clean package
+
+      - name: Upload file .jar sebagai artefak
+        uses: actions/upload-artifact@v5
+        with:
+          name: DeathDimension-Plugin
+          path: ${{ steps.find_pom.outputs.project_dir }}/target/*.jar
+          if-no-files-found: error
+
+      - name: Buat Release otomatis (hanya kalau pakai tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.find_pom.outputs.project_dir }}/target/*.jar
